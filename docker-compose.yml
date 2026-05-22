@@ -1,0 +1,84 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Servizi infrastrutturali per sviluppo locale.
+#
+# Avvio completo:
+#   docker compose up -d
+#
+# Avvio solo postgres + redis (app e worker girano localmente):
+#   docker compose up -d postgres redis
+#
+# Worker Celery locale (Windows):
+#   celery -A app.tasks.celery_app worker --loglevel=info -P solo
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: rag-postgres
+    environment:
+      POSTGRES_PASSWORD: "1234"
+      POSTGRES_DB: rag_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rag_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Usato solo per deployment containerizzato ──────────────────────────────
+  # Per sviluppo locale commenta questi due servizi e usa uvicorn + celery
+  # direttamente nel terminale.
+
+  api:
+    build: .
+    container_name: rag-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql+psycopg://postgres:1234@postgres:5432/rag_db"
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles: ["full"]   # docker compose --profile full up
+
+  celery-worker:
+    build: .
+    container_name: rag-worker
+    command: celery -A app.tasks.celery_app worker --loglevel=info -P solo
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgresql+psycopg://postgres:1234@postgres:5432/rag_db"
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles: ["full"]   # docker compose --profile full up
+
+volumes:
+  pgdata:
+  redisdata:
