@@ -1,0 +1,78 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: 1234
+          POSTGRES_DB: rag_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:1234@localhost:5433/rag_db
+      REDIS_URL: redis://localhost:6379/0
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GROQ_MODEL: llama-3.3-70b-versatile
+      EMBEDDING_MODEL: all-MiniLM-L6-v2
+      CHUNK_SIZE: 500
+      CHUNK_OVERLAP: 50
+      TOP_K: 5
+      UPLOAD_DIR: uploads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Cache HuggingFace model (~90 MB, scaricato una volta sola)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-hf-all-MiniLM-L6-v2
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio httpx
+
+      - name: Create uploads directory
+        run: mkdir -p uploads
+
+      - name: Run unit tests (no DB required)
+        run: python -m pytest tests/test_pdf_service.py tests/test_embedding_service.py -v
+
+      - name: Run integration tests (DB + Redis required)
+        run: python -m pytest tests/test_advanced.py tests/test_api_integration.py -v
