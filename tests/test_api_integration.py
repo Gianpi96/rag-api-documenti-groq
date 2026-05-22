@@ -84,6 +84,7 @@ class TestQuery:
         response = client.post(
             "/documents/query",
             json={"question": "Cos'è il machine learning?", "top_k": 3},
+            headers={"X-User-ID": "test-integration"},
         )
         assert response.status_code in (200, 404)
 
